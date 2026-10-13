@@ -1,0 +1,14 @@
+node_modules/
+dist/
+artifacts/
+.DS_Store
+*.log
+
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+sentence-flow-diagnostics-*.json
+playwright-report/
+test-results/

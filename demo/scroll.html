@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>滚动增量翻译测试</title>
+<style>
+  body { margin:32px; font:18px/1.7 system-ui; }
+  main { max-width:800px; margin:auto; }
+  #feed article { min-height:560px; border-bottom:1px solid #ddd; }
+  #sentinel { height:80px; }
+  #pane { height:240px; overflow:auto; border:1px solid #aaa; }
+  #pane section { min-height:1400px; }
+</style>
+<main>
+  <h1>滚动加载测试</h1>
+  <div id="feed"></div>
+  <div id="sentinel">继续向下滚动</div>
+  <div id="pane" hidden><section><p id="recycled">The first virtual row is ready.</p></section><section><p id="nested-next">The next nested row appears after scrolling.</p></section></div>
+</main>
+<script>
+  let count = 0, batches = 0;
+  function appendBatch() {
+    for (let i = 0; i < 2; i++) {
+      const article = document.createElement('article');
+      article.id = `entry-${++count}`;
+      const p = document.createElement('p');
+      p.textContent = `Scrolling entry ${count} arrives. Its details are ready.`;
+      article.append(p); document.querySelector('#feed').append(article);
+    }
+    return ++batches;
+  }
+  if (location.search.includes('virtual')) {
+    document.querySelector('#pane').hidden = false;
+    document.querySelector('#sentinel').hidden = true;
+  } else {
+    appendBatch();
+    new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting) && batches < 4) appendBatch();
+    }).observe(document.querySelector('#sentinel'));
+  }
+</script>
+</html>

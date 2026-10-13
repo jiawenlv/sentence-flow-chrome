@@ -1,0 +1,4 @@
+* text=auto
+*.png binary
+# Unified patches require a leading context marker on otherwise blank lines.
+*.patch -whitespace

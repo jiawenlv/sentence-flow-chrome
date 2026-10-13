@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>列表与延迟内容测试</title>
+<style>
+  body { margin:32px; font:17px/1.6 system-ui; }
+  #app { max-width:1100px; margin:auto; }
+  #catalog, #dashboard { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  article, #dashboard > div { padding:20px; background:#f4f5f4; border-radius:12px; }
+  aside { margin-top:24px; }
+</style>
+<body>
+<div id="app">
+  <h1>最新列表</h1>
+  <section id="dashboard"></section>
+  <section id="catalog">
+    <article id="tile-1"><h2>A woodland journey</h2><p>The first collection is ready.</p></article>
+    <article id="tile-2"><h2>Across the quiet lake</h2><p>The second collection is ready.</p></article>
+    <article id="tile-3"><h2>Under the evening sky</h2><p>The third collection is ready.</p></article>
+  </section>
+  <button id="load">加载更多</button>
+</div>
+<aside id="unrelated">An unrelated static sidebar remains separate.</aside>
+<script>
+  if (location.search.includes('multiple-main')) {
+    const catalog = document.querySelector('#catalog'), cards = [...catalog.children];
+    const primary = document.createElement('main');
+    catalog.replaceWith(primary);
+    primary.append(cards[0]);
+    const secondary = document.createElement('main'); secondary.id = 'secondary';
+    secondary.append(...cards.slice(1));
+    primary.after(secondary);
+  }
+  setTimeout(()=>{
+    document.querySelector('#dashboard').innerHTML = '<div><p id="earned">Points earned</p></div><div><p id="completed">Visits completed</p></div><div><p id="available">Rewards available</p></div><p id="help">Open the collection to see your rewards.</p>';
+  },600);
+  document.querySelector('#load').onclick = () => {
+    const article = document.createElement('article'); article.id = 'tile-4';
+    article.innerHTML = '<h2>A newly discovered trail</h2><p>The next collection has arrived.</p>';
+    (document.querySelector('#catalog') || document.querySelector('#secondary')).append(article);
+  };
+</script>
+</body>
+</html>

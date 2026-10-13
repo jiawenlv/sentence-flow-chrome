@@ -1,0 +1,100 @@
+--- a/src/server.js
++++ b/src/server.js
+@@ -235,8 +235,18 @@
+   })
+ }
+ 
+-function createOllamaClient() {
+-  return new Ollama({ host: OLLAMA_HOST })
++function createOllamaClient(signal) {
++  return new Ollama({
++    host: OLLAMA_HOST,
++    // SDK abort() tracks streamed iterators only. Propagate disconnects to
++    // fetch itself, including non-streaming calls and the initial headers wait.
++    fetch: (url, options = {}) => fetch(url, {
++      ...options,
++      signal: signal && options.signal
++        ? AbortSignal.any([signal, options.signal])
++        : signal || options.signal,
++    }),
++  })
+ }
+ 
+ function createChatRequest(body, stream) {
+@@ -306,15 +316,11 @@
+   }
+ }
+ 
+-async function handleChatCompletions(req, res) {
++async function handleChatCompletions(req, res, signal) {
+   const body = await readJson(req)
+   const stream = body.stream === true
+   const request = createChatRequest(body, stream)
+-  const ollama = createOllamaClient()
+-
+-  req.on('close', () => {
+-    if (!res.writableEnded) ollama.abort()
+-  })
++  const ollama = createOllamaClient(signal)
+ 
+   if (stream) {
+     await streamChatCompletion(res, ollama, request)
+@@ -391,11 +397,11 @@
+   res.end()
+ }
+ 
+-async function handleCompletions(req, res) {
++async function handleCompletions(req, res, signal) {
+   const body = await readJson(req)
+   const model = resolveModel(body.model)
+   const messages = completionPromptToMessages(body.prompt)
+-  const ollama = createOllamaClient()
++  const ollama = createOllamaClient(signal)
+   const response = await ollama.chat({
+     model,
+     messages,
+@@ -432,6 +438,14 @@
+   if (!requireAuth(req, res)) return
+ 
+   const url = new URL(req.url || '/', `http://${req.headers.host || `${HOST}:${PORT}`}`)
++  const controller = new AbortController()
++  const disconnected = () => {
++    if (!res.writableEnded) controller.abort(new Error('Client disconnected.'))
++  }
++  // IncomingMessage.close also means the request body finished normally.
++  // ServerResponse.close is the lifetime of the response being generated.
++  res.once('close', disconnected)
++  if (res.destroyed) disconnected()
+ 
+   try {
+     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+@@ -445,17 +459,18 @@
+     }
+ 
+     if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
+-      await handleChatCompletions(req, res)
++      await handleChatCompletions(req, res, controller.signal)
+       return
+     }
+ 
+     if (req.method === 'POST' && url.pathname === '/v1/completions') {
+-      await handleCompletions(req, res)
++      await handleCompletions(req, res, controller.signal)
+       return
+     }
+ 
+     openAiError(res, 404, `Route not found: ${req.method} ${url.pathname}`, 'invalid_request_error')
+   } catch (error) {
++    if (controller.signal.aborted || res.destroyed) return
+     if (res.headersSent) {
+       res.write(
+         `data: ${JSON.stringify({
+@@ -478,6 +493,8 @@
+       error.message || 'Unexpected server error.',
+       error.status && error.status < 500 ? 'invalid_request_error' : 'server_error',
+     )
++  } finally {
++    res.off('close', disconnected)
+   }
+ }
+ 

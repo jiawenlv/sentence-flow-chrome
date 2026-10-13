@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>倒计时分组测试</title>
+<style>
+  body { margin:32px; font:18px/1.6 system-ui; background:#180e18; color:#eee; }
+  main { max-width:720px; margin:auto; }
+  .card { margin:16px 0; padding:16px; background:#281a29; }
+  #stack > span { display:block; }
+  #flex { display:flex; flex-direction:column; }
+  [data-clock] { color:#ff914a; font-size:32px; font-weight:700; }
+</style>
+<main>
+  <h1>倒计时分组</h1>
+  <div class="card" id="stack"><span id="stack-label">NEXT KNOCK IN</span><span data-clock>04:28:33</span></div>
+  <div class="card" id="flex"><span id="flex-label">NEXT KNOCK IN</span><span data-clock>04:28:33</span></div>
+  <p class="card" id="line"><span id="line-label">NEXT KNOCK IN</span><br><span data-clock>04:28:33</span></p>
+  <div class="card" id="semantic"><span id="semantic-label">NEXT KNOCK IN</span><span role="timer" data-clock>04:28:33</span></div>
+  <p id="prose">Pay <strong>30</strong> credits to <a href="#rewards">see your rewards</a>.</p>
+</main>
+<script>
+  window.tickCount = 0;
+  window.tick = () => {
+    window.tickCount++;
+    const time = `04:28:${String(59 - window.tickCount % 60).padStart(2,'0')}`;
+    document.querySelectorAll('[data-clock]').forEach((element,index) => {
+      if (index % 2) element.firstChild.data = time;
+      else element.textContent = time;
+    });
+  };
+  window.clockInterval = setInterval(window.tick,80);
+</script>
+</html>

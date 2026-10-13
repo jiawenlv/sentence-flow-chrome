@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>独立翻译单元测试</title>
+<style>
+  body { margin:32px; font:17px/1.8 system-ui; }
+  main { max-width:1000px; margin:auto; }
+  section { margin:20px 0; padding:12px; background:#f4f5f4; }
+  .chip { display:inline-block; padding:2px 10px; border:1px solid #aaa; }
+  #prose { max-width:230px; }
+  #prose strong { display:inline-block; }
+  td,th { padding:8px; border:1px solid #ddd; }
+</style>
+<main>
+  <h1>独立翻译单元</h1>
+  <section id="actions">Available offers <button id="buy">Buy now</button> Recently viewed <span id="details" role="button" tabindex="0">See details</span> Popular collections</section>
+  <section id="blocks">Before the panel<div id="inner-panel">Inside the panel</div>After the panel<hr>Below the divider</section>
+  <section id="form"><label id="first-label">First name<input aria-label="姓名"></label><label id="last-label">Last name<input aria-label="姓氏"></label></section>
+  <section id="links"><a id="browse" href="#collections">Browse collections</a> | <a id="contact" href="#contact">Contact the team</a></section>
+  <section id="chips"><span class="chip" id="new-chip">New arrivals</span> <span class="chip" id="favorite-chip">Customer favorites</span></section>
+  <section id="tabs" role="tablist"><span id="overview" role="tab">Overview</span> <span id="activity" role="tab">Activity</span></section>
+  <section id="status-row"><span id="status" role="status">Ready to continue</span><output id="counter">42</output><span id="status-help">Your next step</span></section>
+  <table><tr><th>Collection name</th><th>Availability</th></tr><tr><td>Forest edition</td><td>Available today</td></tr></table>
+  <dl><dt>Delivery</dt><dd>Within three days</dd></dl>
+  <p id="prose">Pay <strong>30</strong> credits to <a href="#guide">read the complete guide</a> for <em>new readers</em>.</p>
+  <p id="excluded">Before the code <code translate="no">privateCodeValue()</code> After the code</p>
+  <p id="hidden">Keep <span hidden>Do not send this hidden text.</span>reading.</p>
+  <div id="role-change">Before action <span id="new-role">Special action</span> After action</div>
+  <p id="link-flow">Read <a id="guide-link" href="#guide">the guide</a>.</p>
+</main>
+<script>
+  window.buyClicks = 0;
+  document.querySelector('#buy').onclick = () => window.buyClicks++;
+</script>
+</html>

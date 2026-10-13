@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Dynamic reader test</title>
+<style>body{font:18px/1.7 system-ui;margin:40px;max-width:800px}button{margin:8px;padding:8px}dialog{max-width:500px}</style>
+<body>
+<main hidden><p>This obsolete view should remain hidden.</p></main>
+<main id="reader">
+  <h1>A changing reading page</h1><p id="base">This is the visible article.</p>
+  <button id="append">Load more</button><button id="portal">Open details</button>
+  <button id="expand">Show existing details</button><button id="modal">Open a dialog</button>
+  <button id="panel">Open a side panel</button><button id="inline">Append an inline notice</button>
+</main>
+<aside id="stable">An unrelated sidebar stays outside the article.</aside>
+<div id="existing" hidden><p>A previously hidden detail is now visible.</p></div>
+<dialog id="native"><p>A native dialog also contains readable text.</p></dialog>
+<div id="ticker">状态</div>
+<script>
+if (new URL(location.href).searchParams.has('empty')) {
+  document.querySelector('#reader').innerHTML='<p>这里暂时没有外语文字。</p><button id="append">加载内容</button>';
+}
+document.querySelector('#append').onclick=()=>{
+  const region=document.createElement('section');region.id='added';
+  region.innerHTML='<p>A newly loaded sentence appears. More content follows.</p>';
+  document.querySelector('#reader').append(region);
+};
+document.querySelector('#portal')?.addEventListener('click',()=>{
+  const region=document.createElement('div');region.id='portal-content';region.setAttribute('role','dialog');
+  region.innerHTML='<p>This portal is outside the main article.</p>';
+  document.body.append(region);
+});
+document.querySelector('#expand')?.addEventListener('click',()=>{document.querySelector('#existing').hidden=false;});
+document.querySelector('#modal')?.addEventListener('click',()=>document.querySelector('#native').showModal());
+document.querySelector('#panel')?.addEventListener('click',()=>{
+  const region=document.createElement('section');region.id='outside-panel';
+  region.innerHTML='<p>This new side panel is outside the article.</p>';document.body.append(region);
+});
+document.querySelector('#inline')?.addEventListener('click',()=>{
+  const region=document.createElement('span');region.id='inline-extra';
+  region.textContent='An inline notice has arrived.';document.body.append(region);
+});
+</script>
+</body></html>

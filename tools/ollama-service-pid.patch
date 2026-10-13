@@ -1,0 +1,95 @@
+--- a/src/service-manager.js
++++ b/src/service-manager.js
+@@ -1,4 +1,4 @@
+-import { spawn } from 'node:child_process'
++import { spawn, execFileSync } from 'node:child_process'
+ import fs from 'node:fs'
+ import path from 'node:path'
+ import { fileURLToPath } from 'node:url'
+@@ -175,6 +175,22 @@
+     return Number.isInteger(pid) && pid > 0 ? pid : null
+   }
+ 
++  // A PID can be reused after a crash/reboot. Never infer service ownership
++  // from kill(pid, 0), and never signal a process until its executable and
++  // exact server script have both been checked.
++  function isServiceProcess(pid) {
++    if (!isRunning(pid)) return false
++    try {
++      const options = { encoding: 'utf8', timeout: 2000 }
++      const executable = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], options).trim()
++      const command = execFileSync('ps', ['-p', String(pid), '-o', 'args='], options).trim()
++      return /^node(?:js)?$/i.test(path.basename(executable)) && command.endsWith(` ${paths.serverFile}`)
++    } catch {
++      if (!isRunning(pid)) return false
++      throw new Error(`Cannot verify whether PID ${pid} belongs to ${service.name}; no process was stopped.`)
++    }
++  }
++
+   function removePidFile() {
+     try {
+       fs.rmSync(paths.pidFile, { force: true })
+@@ -204,7 +220,7 @@
+       ensureStateDir()
+ 
+       const existingPid = readPid()
+-      if (isRunning(existingPid)) {
++      if (isServiceProcess(existingPid)) {
+         console.log(`${displayName} is already running. PID: ${existingPid}`)
+         console.log(`URL: ${url()}`)
+         return
+@@ -244,7 +260,7 @@
+ 
+       await sleep(800)
+ 
+-      if (!isRunning(child.pid)) {
++      if (!isServiceProcess(child.pid)) {
+         removePidFile()
+         console.error(`${displayName} failed to start.`)
+         const recentLogs = tailLog()
+@@ -267,37 +283,38 @@
+     async stop() {
+       const pid = readPid()
+ 
+-      if (!isRunning(pid)) {
++      if (!isServiceProcess(pid)) {
+         removePidFile()
+         console.log(`${displayName} is not running.`)
+-        return
++        return true
+       }
+ 
+       process.kill(pid, 'SIGTERM')
+ 
+       for (let index = 0; index < 40; index += 1) {
+         await sleep(100)
+-        if (!isRunning(pid)) {
++        if (!isServiceProcess(pid)) {
+           removePidFile()
+           console.log(`${displayName} stopped.`)
+-          return
++          return true
+         }
+       }
+ 
+       console.log(`${displayName} was asked to stop, but PID ${pid} is still running.`)
+       console.log(`Run \`${displayName} status\` again in a moment.`)
++      process.exitCode = 1
++      return false
+     },
+ 
+     async restart() {
+-      await this.stop()
+-      await this.start()
++      if (await this.stop()) await this.start()
+     },
+ 
+     status() {
+       const pid = readPid()
+       const serviceConfig = config()
+ 
+-      if (isRunning(pid)) {
++      if (isServiceProcess(pid)) {
+         console.log(`${displayName} is running. PID: ${pid}`)
+         console.log(`URL: ${url()}`)
+         console.log(`Model: ${serviceConfig.model}`)
