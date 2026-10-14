@@ -13,7 +13,7 @@ try { playwright = require('playwright'); } catch {
 const root = path.resolve(import.meta.dirname,'..');
 const temp = await fs.mkdtemp(path.join(os.tmpdir(),'sentence-flow-e2e-'));
 const extension = path.join(temp,'extension');
-const calls = []; let mode = 'ok', delay = 0, nextDelays = [];
+const calls = []; let mode = 'ok', delay = 0, nextDelays = [], partialSuccessLimit = 0;
 const dictionary = {
   'The world is full of small wonders.':'世界充满了微小的奇迹。', 'We just need to slow down enough to see them.':'我们只需放慢脚步，便能看见它们。',
   'You do not need to travel far to find something extraordinary.':'不必远行，也能发现非凡之处。',
@@ -47,11 +47,12 @@ const server = http.createServer(async(req,res)=>{
     const body = JSON.parse(raw), texts = JSON.parse(body.messages[1].content).texts;
     const call = {path:req.url,texts,model:body.model,jsonMode:body.response_format?.type === 'json_object',aborted:false,finished:false};
     calls.push(call);
+    const partialFailure = mode === 'partial-failure' && calls.filter(item=>item.model===body.model).length > partialSuccessLimit;
     res.on('close',()=>{ if (!res.writableEnded) call.aborted = true; });
     const responseDelay = nextDelays.length ? nextDelays.shift() : delay;
     if (responseDelay) await new Promise(resolve=>setTimeout(resolve,responseDelay));
     if (res.destroyed) return;
-    if (mode === 'unauthorized') { res.writeHead(401,{'content-type':'application/json'}); res.end('{}'); return; }
+    if (mode === 'unauthorized' || partialFailure) { res.writeHead(401,{'content-type':'application/json'}); res.end('{}'); return; }
     const translations = texts.map(row=>({id:row.id,text:dictionary[row.text] || `译文：${row.text}`}));
     const content = mode === 'malformed' ? '{"translations":[]}' : mode === 'plain' && !call.jsonMode ? 'Plain translation without the requested JSON envelope.' : JSON.stringify({translations});
     res.writeHead(200,{'content-type':'application/json'});
@@ -221,6 +222,18 @@ try {
   assert.equal(await failureNotice.count(),0,'successful retry removes the failure notice');
   assert.ok(calls.every(call=>call.texts.every(item=>!item.text.includes('句流 ·') && !item.text.includes('查看配置'))),'notice text must never be sent to the model');
   console.log('PASS malformed outputs never enter cache; retry completes');
+  await command('RESTORE'); await admin({type:'CLEAR_CACHE'});
+  partialSuccessLimit = calls.filter(item=>item.model==='online-model').length + 1;
+  mode = 'partial-failure'; nextDelays = [0,300];
+  await command('START'); await waitStatus('error');
+  const completedSpans = await page.locator('[data-sentence-flow="translation"]').elementHandles();
+  assert.ok(completedSpans.length > 0,'first batch must finish before the next fails');
+  const retryCompletedSources = calls.findLast(call=>call.finished && call.model==='online-model').texts.map(item=>item.text);
+  before = calls.length; mode = 'ok';
+  await failureNotice.getByRole('button',{name:'重试翻译'}).click(); await done();
+  for (const span of completedSpans) assert.equal(await span.evaluate(node=>node.isConnected),true,'retry preserves completed translation nodes');
+  assert.ok(calls.slice(before).every(call=>call.texts.every(item=>!retryCompletedSources.includes(item.text))),'retry must not request completed sentences again');
+  console.log('PASS retry preserves completed translations and resumes unfinished batches');
   await command('RESTORE'); await admin({type:'CLEAR_CACHE'});
   mode = 'plain'; before = calls.length; await command('START'); await done();
   assert.ok(calls.slice(before).some(call=>!call.jsonMode));

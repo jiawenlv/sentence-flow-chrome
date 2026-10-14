@@ -66,7 +66,19 @@
     if (session) void send({type:'CANCEL',session}).catch(() => {});
     update();
   }
-  function retry() { const fresh = ignoreCache; restore(); return start({ignoreCache:fresh}); }
+  function retry() {
+    if (!session) return start({ignoreCache});
+    if (!error) return status();
+    // Keep completed spans and ranges for unfinished sentences. A new session
+    // also prevents late replies from the failed run from changing this run.
+    const previous = session;
+    session = crypto.randomUUID(); generation++; busy = 0;
+    error = ''; paused = false; phase = 'running';
+    dismissedNotice = ''; removeNotice();
+    void send({type:'CANCEL',session:previous}).catch(() => {});
+    scan();
+    return status();
+  }
   function isIgnored(node) {
     const parent = node.parentElement;
     if (!parent || parent.closest(SKIP) || parent.isContentEditable || parent.namespaceURI !== 'http://www.w3.org/1999/xhtml') return true;
