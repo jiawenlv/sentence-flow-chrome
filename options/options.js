@@ -1,6 +1,6 @@
 import '../shared/core.js';
 const C = globalThis.SentenceFlowCore, $ = id => document.getElementById(id);
-let config = C.settings(), provider = 'ollama', pending = false, loaded = false, dirty = false;
+let config = C.settings(), provider = 'online', pending = false, loaded = false, dirty = false;
 const send = async message => {
   try {
     const result = await chrome.runtime.sendMessage(message);
@@ -10,21 +10,9 @@ const send = async message => {
 };
 function message(id,text,error = false) { $(id).textContent = text; $(id).classList.toggle('error',error); }
 function stashProfile() { config[provider] = {baseUrl:$('baseUrl').value, model:$('modelName').value, apiKey:$('apiKey').value}; }
-function showProfile(next) {
-  provider = next; config.provider = next;
-  const local = next === 'ollama';
-  for (const button of document.querySelectorAll('[data-provider]')) { const active = button.dataset.provider === next; button.classList.toggle('active',active); button.setAttribute('aria-pressed',String(active)); }
-  $('baseUrl').value = config[next].baseUrl; $('modelName').value = config[next].model; $('apiKey').value = config[next].apiKey;
-  $('provider-title').textContent = local ? '连接你的 Ollama' : '连接在线大模型';
-  $('provider-badge').textContent = local ? 'LOCAL FIRST' : 'OPENAI COMPATIBLE';
-  $('baseUrl').placeholder = local ? 'http://localhost:11434' : 'https://api.example.com/v1';
-  $('endpoint-hint').textContent = local ? '填写服务根地址，自动补全 /api/chat。' : '填写 Base URL，也支持完整的 /chat/completions 地址。';
-  $('modelName').placeholder = local ? '填写已安装的模型名称' : '填写服务支持的模型 ID';
-  $('model-hint').textContent = local ? '运行 ollama list 查看本机已安装模型。' : '支持 OpenAI、DeepSeek 等兼容 Chat Completions 的服务。';
-  $('apiKey').placeholder = local ? '本地服务通常无需填写' : '填入服务商提供的 API Key';
-  $('key-note').textContent = local ? '可选' : '按服务商要求填写';
-  $('ollama-help').hidden = !local;
-  $('connection-hint').textContent = local ? '用一句短句，确认本地模型已准备好。' : '测试会向该服务发送一句短句，可能产生少量费用。';
+function showProfile() {
+  provider = 'online'; config.provider = provider;
+  for (const [id, key] of [['baseUrl','baseUrl'],['modelName','model'],['apiKey','apiKey']]) $(id).value = config.online[key];
   message('connection-message','');
 }
 function readForm() {
@@ -37,7 +25,6 @@ function busy(value) {
   for (const control of document.querySelectorAll('#settings-form input, #settings-form select, [data-provider], #show-key, #test, #save')) control.disabled = value || !loaded;
 }
 function changed() { dirty = true; message('save-status','有未保存的更改，请保存后再回到网页重试翻译。'); message('connection-message',''); }
-for (const button of document.querySelectorAll('[data-provider]')) button.addEventListener('click', () => { if (pending || !loaded || provider === button.dataset.provider) return; stashProfile(); showProfile(button.dataset.provider); changed(); });
 $('show-key').addEventListener('click', () => { const hidden = $('apiKey').type === 'password'; $('apiKey').type = hidden ? 'text' : 'password'; $('show-key').textContent = hidden ? '隐藏' : '显示'; $('show-key').setAttribute('aria-label',hidden ? '隐藏 API Key' : '显示 API Key'); });
 $('settings-form').addEventListener('submit', async event => {
   event.preventDefault(); if (pending || !loaded) return;
@@ -129,11 +116,14 @@ async function init() {
   message('save-status','正在读取已保存的设置…');
   try {
     config = (await send({type:'GET_SETTINGS'})).settings;
-    showProfile(config.provider);
+    if (config.provider === 'ollama' && !config.online.model.trim()) {
+      const legacy = config.ollama;
+      config.online = {...legacy, baseUrl:legacy.baseUrl.replace(/\/api(?:\/chat)?\/?$/u,'').replace(/\/+$/u,'')};
+    }
+    showProfile();
     for (const key of ['targetLanguage','scope','style','timeout']) $(key).value = config[key];
     for (const key of ['translateFixed','cacheFixed','lazy']) $(key).checked = config[key];
     updatePreview();
-    $('origins-command').textContent = `launchctl setenv OLLAMA_ORIGINS "chrome-extension://${chrome.runtime.id}"`;
     loaded = true; dirty = false;
     message('save-status','保存后，已开启的页面请先关闭再开启翻译。');
   } catch(error) {

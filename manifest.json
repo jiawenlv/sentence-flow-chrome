@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "句流 · Sentence Flow",
-  "version": "1.4.3",
-  "description": "一句原文，一句译文。支持在线大模型与 Ollama，跨页面复用网站固定文案。",
+  "version": "1.5.0",
+  "description": "整段理解，双语对照。支持本地和在线 OpenAI 兼容模型，跨页面复用网站固定文案。",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
     "scripting",
-    "storage"
+    "storage",
+    "contextMenus"
   ],
   "background": {
     "service_worker": "background/service-worker.js",

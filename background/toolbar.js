@@ -5,7 +5,7 @@ const getSettings = async () => C.settings((await chrome.storage.local.get('sett
 export function showState(tabId, state) {
   let text = '', color = '#536951', title = '句流 · 点击翻译当前页面';
   if (state.phase !== 'idle') {
-    const count = `${state.translated || 0} / ${state.total || 0} 句`;
+    const count = `${state.translated || 0} / ${state.total || 0} ${state.readingUnit === 'paragraph' ? '段' : '句'}`;
     if (state.error || state.phase === 'error') {
       text = '!'; color = '#b55332'; title = `句流 · ${state.error || '翻译失败，请右键图标 →「选项」检查配置并测试连接。'}`;
     } else if (state.paused) { text = 'Ⅱ'; title = `句流 · 已暂停（${count}），点击恢复原文`; }

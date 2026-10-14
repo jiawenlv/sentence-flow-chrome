@@ -25,3 +25,11 @@ test('diagnostic storage failure cannot break translation and later records can 
   broken=false; await logs.record('toolbar.click',{tabId:7});
   assert.equal((await logs.read()).length,1);
 });
+
+test('file sink receives sanitized metadata and cannot break local logging',async()=>{
+  let stored={},received;
+  const logs=createDiagnostics({get:async()=>stored,set:async value=>{stored=value;}},undefined,entry=>{received=entry;throw new Error('receiver unavailable');});
+  await logs.record('model.error',{text:'private source',apiKey:'sk-secret',stage:'plain_text',error:'Bearer secret'});
+  assert.equal(received.text,undefined);assert.equal(received.apiKey,undefined);assert.equal(received.stage,'plain_text');
+  assert.match(received.error,/已隐藏/);assert.equal((await logs.read()).length,1);
+});

@@ -7,10 +7,13 @@ function requestResult(request) {
 }
 async function db() {
   if (!database) database = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(DB_NAME, 2);
     request.onupgradeneeded = () => {
-      const store = request.result.createObjectStore('translations', { keyPath:'key' });
-      store.createIndex('createdAt', 'createdAt');
+      if (!request.result.objectStoreNames.contains('translations')) {
+        const store = request.result.createObjectStore('translations', { keyPath:'key' });
+        store.createIndex('createdAt', 'createdAt');
+      }
+      if (!request.result.objectStoreNames.contains('pages')) request.result.createObjectStore('pages', {keyPath:'url'});
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => { database = null; reject(request.error); };
@@ -55,5 +58,21 @@ export async function cacheClear(origin) {
     const rows = await requestResult(store.getAll());
     rows.filter(row => row.origin === origin).forEach(row => store.delete(row.key));
   }
+  await done;
+}
+
+export async function cacheTrackPage(url, keys) {
+  const tx = (await db()).transaction('pages', 'readwrite'), done = transactionDone(tx);
+  const store = tx.objectStore('pages');
+  const previous = await requestResult(store.get(url));
+  store.put({url, keys:[...new Set([...(previous?.keys || []), ...keys])].slice(-4000)});
+  await done;
+}
+export async function cacheClearPage(url, extraKeys = []) {
+  const tx = (await db()).transaction(['pages','translations'], 'readwrite'), done = transactionDone(tx);
+  const pages = tx.objectStore('pages');
+  const page = await requestResult(pages.get(url));
+  for (const key of new Set([...(page?.keys || []), ...extraKeys])) tx.objectStore('translations').delete(key);
+  pages.delete(url);
   await done;
 }

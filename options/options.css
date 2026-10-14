@@ -3,3 +3,5 @@ html{scroll-behavior:smooth;scroll-padding-top:30px}.layout{max-width:1280px;mar
 .save-bar>span.error{color:#a35c39}input:disabled,select:disabled{opacity:.65}
 
 .diagnostics-card{padding:20px 26px}.diagnostics-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.diagnostics-card details{margin-top:14px;font-size:12px}.diagnostics-card pre{max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 ui-monospace,monospace;background:#f3f5ef;padding:12px;border-radius:8px}
+
+.preview p>.preview-translation{display:block;margin:.45em 0 0}

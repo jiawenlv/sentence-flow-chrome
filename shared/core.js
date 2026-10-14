@@ -1,8 +1,8 @@
 (() => {
   const DEFAULTS = Object.freeze({
-    provider: 'ollama', online: { baseUrl: 'https://api.openai.com/v1', model: '', apiKey: '' },
+    provider: 'online', online: { baseUrl: 'https://api.openai.com/v1', model: '', apiKey: '' },
     ollama: { baseUrl: 'http://localhost:11434', model: '', apiKey: '' },
-    targetLanguage: 'zh-CN', scope: 'article', translateFixed: true, cacheFixed: true,
+    targetLanguage: 'zh-CN', readingUnit:'paragraph', scope: 'article', translateFixed: true, cacheFixed: true,
     lazy: true, style: 'soft', timeout: 90
   });
   const LANGUAGES = { 'zh-CN':'简体中文', 'zh-TW':'繁體中文', en:'English', ja:'日本語', ko:'한국어', fr:'Français', de:'Deutsch', es:'Español' };
@@ -52,6 +52,20 @@
     }
     return result;
   }
+  function paragraphText(text, locale, limit = 6000) {
+    const trimmed = text.trim(), start = text.length - text.trimStart().length;
+    if (!trimmed) return [];
+    if (trimmed.length <= limit) return [{text:trimmed,start,end:start+trimmed.length}];
+    // Only exceptional long paragraphs are split, preferably at sentence boundaries.
+    const chunks = [];
+    for (const part of segmentText(text,locale,limit)) {
+      const previous = chunks.at(-1);
+      if (previous && part.end - previous.start <= limit) {
+        previous.end = part.end; previous.text = text.slice(previous.start,previous.end);
+      } else chunks.push({...part});
+    }
+    return chunks;
+  }
   function needsTranslation(text, language) {
     if (!/\p{L}/u.test(text) || /^(?:https?:\/\/|[\w.+-]+@[\w.-]+\.[a-z]{2})/iu.test(text)) return false;
     if (language === 'zh-CN' || language === 'zh-TW') {
@@ -78,6 +92,7 @@
   function validateSettings(value) {
     const config = settings(value);
     if (!['ollama', 'online'].includes(config.provider)) throw new Error('请选择支持的翻译服务。');
+    if (!['paragraph','sentence'].includes(config.readingUnit)) throw new Error('阅读单位无效。');
     if (!LANGUAGES[config.targetLanguage]) throw new Error('请选择有效的目标语言。');
     if (!['article', 'page'].includes(config.scope) || !['soft','underline','plain'].includes(config.style)) throw new Error('阅读设置无效。');
     for (const flag of ['translateFixed','cacheFixed','lazy']) if (typeof config[flag] !== 'boolean') throw new Error('阅读设置无效。');
@@ -102,13 +117,17 @@
     const map = new Map();
     for (const row of rows) {
       if (!row || !Number.isInteger(row.id) || typeof row.text !== 'string' || !row.text.trim() || row.text.length > 10000 || map.has(row.id)) throw new Error('模型返回的句子格式不正确，请重试；若仍失败，请在设置中更换模型并测试连接。');
+      const source = items.find(item => item.id === row.id)?.text || '';
+      // Reject leaked JSON envelope endings, but preserve punctuation present in the source.
+      const envelopeEnd = /["”]\s*[}]\s*[\]]\s*[}]\s*$/u;
+      if (envelopeEnd.test(row.text) && !envelopeEnd.test(source)) throw new Error('模型未返回有效 JSON 译文：译文中混入了 JSON 结构，请重试或更换模型。');
       map.set(row.id, row.text.trim());
     }
     if (map.size !== items.length || items.some(item => !map.has(item.id))) throw new Error('模型返回的句子数量或编号不匹配，请重试；若仍失败，请在设置中更换模型并测试连接。');
     return items.map(item => ({ id: item.id, text: map.get(item.id) }));
   }
   function cacheIdentity(config, origin, text, kind = 'article') {
-    return JSON.stringify(['sentence-flow-v1', origin, config.targetLanguage, config.provider, endpoint(config), config[config.provider].model, kind, normalizeText(text)]);
+    return JSON.stringify(['sentence-flow-v5', origin, config.targetLanguage, config.provider, endpoint(config), config[config.provider].model, kind, normalizeText(text)]);
   }
   function packItems(items, maxCount = 12, maxChars = 6000) {
     const packs = []; let pack = [], chars = 0;
@@ -119,5 +138,5 @@
     if (pack.length) packs.push(pack);
     return packs;
   }
-  globalThis.SentenceFlowCore = { DEFAULTS, LANGUAGES, settings, errorMessage, normalizeText, segmentText, needsTranslation, endpoint, permissionPattern, validateSettings, parseTranslations, cacheIdentity, packItems };
+  globalThis.SentenceFlowCore = { DEFAULTS, LANGUAGES, settings, errorMessage, normalizeText, segmentText, paragraphText, needsTranslation, endpoint, permissionPattern, validateSettings, parseTranslations, cacheIdentity, packItems };
 })();

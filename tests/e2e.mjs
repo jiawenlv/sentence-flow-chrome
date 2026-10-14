@@ -44,7 +44,10 @@ const dictionary = {
 const server = http.createServer(async(req,res)=>{
   if (req.method === 'POST') {
     let raw = ''; for await (const data of req) raw += data;
-    const body = JSON.parse(raw), texts = JSON.parse(body.messages[1].content).texts;
+    const body = JSON.parse(raw), plain = body.messages.length === 1;
+    const prompt = plain ? body.messages[0].content : '';
+    const source = plain ? prompt.slice(prompt.indexOf(prompt.includes('\n%%\n') ? '\n\n' : '\n') + (prompt.includes('\n%%\n') ? 2 : 1)) : '';
+    const texts = plain ? source.split('\n%%\n').map((text,id)=>({id,text})) : JSON.parse(body.messages[1].content).texts;
     const call = {path:req.url,texts,model:body.model,jsonMode:body.response_format?.type === 'json_object',aborted:false,finished:false};
     calls.push(call);
     const partialFailure = mode === 'partial-failure' && calls.filter(item=>item.model===body.model).length > partialSuccessLimit;
@@ -54,12 +57,12 @@ const server = http.createServer(async(req,res)=>{
     if (res.destroyed) return;
     if (mode === 'unauthorized' || partialFailure) { res.writeHead(401,{'content-type':'application/json'}); res.end('{}'); return; }
     const translations = texts.map(row=>({id:row.id,text:dictionary[row.text] || `译文：${row.text}`}));
-    const content = mode === 'malformed' ? '{"translations":[]}' : mode === 'plain' && !call.jsonMode ? 'Plain translation without the requested JSON envelope.' : JSON.stringify({translations});
+    const content = plain ? (mode === 'batchmerged' && texts.length > 1 ? translations.map(row=>row.text).join(' ') : translations.map(row=>row.text).join('\n%%\n')) : mode === 'malformed' ? '{"translations":[]}' : mode === 'plain' && !call.jsonMode ? 'Plain translation without the requested JSON envelope.' : JSON.stringify({translations});
     res.writeHead(200,{'content-type':'application/json'});
     res.end(JSON.stringify(req.url.endsWith('/api/chat') ? {message:{content}} : {choices:[{message:{content}}]})); call.finished = true; return;
   }
   try {
-    const file = path.join(root,'demo',req.url.startsWith('/units') ? 'units.html' : req.url.startsWith('/countdown') ? 'countdown.html' : req.url.startsWith('/catalog') ? 'catalog.html' : req.url.startsWith('/scroll') ? 'scroll.html' : req.url.startsWith('/dynamic') ? 'dynamic.html' : req.url.startsWith('/styled') ? 'styled.html' : req.url.startsWith('/second') ? 'second.html' : 'article.html');
+    const file = path.join(root,'demo',req.url.startsWith('/paragraph') ? 'paragraph.html' : req.url.startsWith('/units') ? 'units.html' : req.url.startsWith('/countdown') ? 'countdown.html' : req.url.startsWith('/catalog') ? 'catalog.html' : req.url.startsWith('/scroll') ? 'scroll.html' : req.url.startsWith('/dynamic') ? 'dynamic.html' : req.url.startsWith('/styled') ? 'styled.html' : req.url.startsWith('/second') ? 'second.html' : 'article.html');
     res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(await fs.readFile(file));
   } catch { res.writeHead(404);res.end(); }
 });
@@ -79,7 +82,7 @@ try {
   let worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker',{timeout:15000});
   worker.on('console', message => { if (message.type() === 'error') console.error('WORKER:',message.text()); });
   const id = new URL(worker.url()).host;
-  const settings = { provider:'ollama', ollama:{baseUrl:origin,model:'test-model',apiKey:''}, targetLanguage:'zh-CN',scope:'article',translateFixed:true,cacheFixed:true,lazy:false,style:'soft',timeout:15 };
+  const settings = { readingUnit:'sentence', provider:'ollama', ollama:{baseUrl:origin,model:'test-model',apiKey:''}, targetLanguage:'zh-CN',scope:'article',translateFixed:true,cacheFixed:true,lazy:false,style:'soft',timeout:15 };
   await worker.evaluate(s=>chrome.storage.local.set({settings:s,floatingEnabled:false}),settings);
   const page = await context.newPage();
   const errors = []; page.on('pageerror',e=>errors.push(e.message));
@@ -637,7 +640,7 @@ try {
   console.log('PASS native light/dark colors, transparent background, compact titles, and measured gaps on both sides of each translation');
   const options = await context.newPage();
   await options.goto(`chrome-extension://${id}/options/options.html`);
-  await options.locator('[data-provider="ollama"]').click();
+  await options.locator('#baseUrl').waitFor();
   await options.locator('#baseUrl').fill(origin); await options.locator('#modelName').fill('test-model');
   await options.locator('#save').click();
   await options.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('已保存'));
@@ -650,7 +653,7 @@ try {
   await options.waitForFunction(()=>document.querySelector('#modelName').disabled);
   await options.waitForFunction(()=>document.querySelector('#connection-message').textContent.includes('连接成功'));
   assert.match(await options.locator('#connection-message').textContent(),/尚未保存/);
-  assert.equal((await admin({type:'GET_SETTINGS'})).settings.ollama.model,'test-model','testing must not save changes');
+  assert.equal((await admin({type:'GET_SETTINGS'})).settings.online.model,'test-model','testing must not save changes');
   delay = 0;
   await options.locator('#modelName').fill(''); before = calls.length;
   await options.locator('#test').click(); await options.waitForTimeout(150);
@@ -680,7 +683,7 @@ try {
   await failedOptions.close();
   console.log('PASS invalid settings, stale connection results, unsaved test changes and recoverable settings loading failure');
   const saved = (await admin({type:'GET_SETTINGS'})).settings;
-  assert.equal(saved.provider,'ollama');assert.equal(saved.ollama.model,'test-model');
+  assert.equal(saved.provider,'online');assert.equal(saved.online.model,'test-model');
   await options.locator('#preview-theme').click();
   await options.locator('#style').selectOption('underline');
   assert.ok(await options.locator('.preview').evaluate(el=>el.classList.contains('dark')));
@@ -690,6 +693,65 @@ try {
   await page.goto(`${origin}/article.html`);
   await command('START'); await command('ALL'); await done();
   await page.screenshot({path:path.join(root,'artifacts/article.png'),fullPage:true});
+  await command('RESTORE');
+  const hySettings={...saved,provider:'online',online:{baseUrl:origin,model:'Hy-MT2-test',apiKey:''}};
+  await worker.evaluate(settings=>chrome.storage.local.set({settings}),hySettings);
+  await admin({type:'CLEAR_CACHE'});
+  await page.goto(`${origin}/article.html`);
+  before=calls.length;nextDelays=[20,1800];
+  await command('START');await command('ALL');
+  await page.locator('[data-sentence-flow]').first().waitFor();
+  assert.ok(calls.slice(before).some(call=>!call.finished),'first small batch should render while another is still pending');
+  await done();
+  assert.ok(calls.slice(before).every(call=>call.texts.length<=4),'Hy-MT page requests should use small batches');
+  assert.ok(calls.slice(before).some(call=>call.texts.length>1));
+  await command('RESTORE');await admin({type:'CLEAR_CACHE'});
+  mode='batchmerged';before=calls.length;
+  await command('START');await command('ALL');await done();
+  assert.ok(calls.slice(before).some(call=>call.texts.length===1),'invalid delimiter batches should fall back to single sentences');
+  assert.equal(await page.locator('[data-sentence-flow]').count()>0,true);
+  mode='ok';await command('RESTORE');
+  await worker.evaluate(settings=>chrome.storage.local.set({settings}),saved);
+  console.log('PASS Hy-MT small batch translation, early page rendering, and single-sentence fallback');
+  const paragraphSettings={...saved,readingUnit:'paragraph',online:{...saved.online,model:'Hy-MT2-paragraph'}};
+  await worker.evaluate(settings=>chrome.storage.local.set({settings}),paragraphSettings);
+  await admin({type:'CLEAR_CACHE'});
+  let sourceParagraph, longParagraph;
+  before=calls.length;
+  await start(`${origin}/paragraph.html`,async()=>{
+    sourceParagraph=(await page.locator('#context').textContent()).trim();
+    longParagraph=(await page.locator('#long').textContent()).trim();
+  });await done();
+  let inputs=calls.slice(before).flatMap(call=>call.texts.map(row=>row.text));
+  assert.ok(inputs.includes(sourceParagraph),'send the complete paragraph, including all adjacent sentences and inline link text');
+  assert.ok(longParagraph.length>1800 && inputs.includes(longParagraph),'ordinary long paragraphs must stay whole');
+  assert.equal(await page.locator('#context [data-sentence-flow]').count(),1);
+  assert.equal(await page.locator('#context [data-sentence-flow]').getAttribute('data-sentence-flow-layout'),'paragraph');
+  const layout=await page.locator('#context').evaluate(p=>{
+    const t=p.querySelector('[data-sentence-flow]'),link=p.querySelector('a');
+    const source=document.createRange();source.setStart(p.firstChild,0);source.setEndBefore(t);
+    return {display:getComputedStyle(t).display,below:t.getBoundingClientRect().top>=source.getBoundingClientRect().bottom-1,linkChildren:link.querySelectorAll('[data-sentence-flow]').length,source:[...p.childNodes].filter(node=>node!==t).map(node=>node.textContent).join('').trim()};
+  });
+  assert.equal(layout.display,'block');assert.equal(layout.below,true);assert.equal(layout.linkChildren,0);assert.equal(layout.source,sourceParagraph);
+  assert.equal(await page.locator('#context strong').textContent(),'Emma');
+  await page.locator('#action').click();assert.equal(await page.evaluate(()=>window.actionClicks),1);
+  assert.equal(await page.locator('pre [data-sentence-flow],[contenteditable] [data-sentence-flow]').count(),0);
+  await page.screenshot({path:path.join(root,'artifacts/paragraph-desktop.png'),fullPage:true});
+  before=calls.length;
+  await page.locator('#context').evaluate(el=>el.append(' Maya answered immediately.'));
+  await page.waitForFunction(()=>document.querySelector('#context [data-sentence-flow]')?.textContent.includes('Maya answered immediately.'));
+  await done();
+  inputs=calls.slice(before).flatMap(call=>call.texts.map(row=>row.text));
+  assert.deepEqual(inputs,[sourceParagraph+' Maya answered immediately.'],'changed paragraphs must be translated again with their full context');
+  await command('RESTORE');before=calls.length;await command('START');await done();
+  assert.equal(calls.length,before,'unchanged complete paragraphs should reuse successful cache');
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:path.join(root,'artifacts/paragraph-mobile.png'),fullPage:true});
+  await page.setViewportSize({width:1280,height:900});
+  await command('RESTORE');assert.equal(await page.locator('#context').textContent(),sourceParagraph+' Maya answered immediately.');
+  await worker.evaluate(settings=>chrome.storage.local.set({settings}),saved);
+  console.log('PASS complete paragraph context, 1800+ character input, paragraph placement, preserved controls, dynamic paragraph replacement, cache and mobile layout');
   // Toolbar-only entry: no popup and no page controls, including legacy users.
   await command('RESTORE');
   await start(`${origin}/styled.html?toolbar`); await done(); await waitBadge('✓');
@@ -735,6 +797,9 @@ try {
   await emptyNotice.getByRole('button',{name:'重试翻译'}).click(); await done();
   assert.equal(await emptyNotice.count(),0); await command('RESTORE');
   console.log('PASS startup configuration failure is visible and retry reads newly saved settings');
+  // Generate a fresh failure: older failures may have aged out of the 300-entry log.
+  mode='unauthorized';await command('START',{ignoreCache:true});await waitStatus('error');
+  mode='ok';await command('RESTORE');
   await options.locator('#refresh-logs').click();
   await options.waitForFunction(()=>document.querySelector('#logs-message').textContent.includes('条日志'));
   const logText = await options.locator('#logs-output').textContent();
@@ -742,7 +807,7 @@ try {
   assert.ok(!logText.includes('test-key')); assert.ok(!logText.includes('A little curiosity opens a new world.'));
   const [download] = await Promise.all([options.waitForEvent('download'),options.locator('#export-logs').click()]);
   const exported = JSON.parse(await fs.readFile(await download.path(),'utf8'));
-  assert.equal(exported.version,'1.4.3'); assert.ok(exported.entries.length>0 && exported.entries.length<=300);
+  assert.equal(exported.version,manifest.version); assert.ok(exported.entries.length>0 && exported.entries.length<=300);
   assert.ok(exported.entries.some(row=>row.event==='toolbar.click'));
   await options.locator('#clear-logs').click();
   await options.waitForFunction(()=>document.querySelector('#logs-message').textContent.includes('0 条日志'));
@@ -757,7 +822,7 @@ try {
   await optionsTab.getByRole('link',{name:'关于 · 版权与许可'}).click();
   await optionsTab.waitForFunction(()=>document.querySelector('#license-text')?.textContent.startsWith('MIT License'));
   assert.equal(await optionsTab.locator('#license-text').textContent(),await fs.readFile(path.join(root,'LICENSE'),'utf8'));
-  assert.match(await optionsTab.locator('#version').textContent(),/1\.4\.3/);
+  assert.ok((await optionsTab.locator('#version').textContent()).includes(manifest.version));
   await optionsTab.waitForFunction(()=>document.querySelector('#privacy-list')?.textContent.includes('API Key'));
   assert.equal(await optionsTab.locator('.reference-list a').count(),6);
   await optionsTab.screenshot({path:path.join(root,'artifacts/about.png'),fullPage:true});

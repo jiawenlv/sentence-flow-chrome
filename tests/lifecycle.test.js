@@ -22,7 +22,7 @@ before(async () => {
   const event = () => ({addListener(){}});
   globalThis.chrome = {
     runtime:{id:'test-extension',getURL:path=>`chrome-extension://test-extension/${path}`,getPlatformInfo:async()=>({}),onMessage:{addListener:listener=>{receive=listener;}},onInstalled:event(),onStartup:event()},
-    storage:{local:{get:async()=>({settings:{ollama:{baseUrl:'http://localhost:11434',model:'test-model'},timeout:15}}),setAccessLevel:async()=>{}}},
+    storage:{local:{get:async()=>({settings:{provider:'ollama',ollama:{baseUrl:'http://localhost:11434',model:'test-model'},timeout:15}}),setAccessLevel:async()=>{}}},
     permissions:{contains:async()=>true},tabs:{sendMessage:async()=>({ok:true}),onRemoved:event(),onUpdated:{addListener:fn=>{tabUpdated=fn;}},query:async()=>[{id:42,url:'chrome://extensions/'}]},action:{onClicked:{addListener:fn=>{actionClicked=fn;}},setBadgeText:async({tabId,text})=>{badgeValues.set(tabId,text);},setBadgeBackgroundColor:async()=>{},setTitle:async()=>{}},commands:{onCommand:{addListener:fn=>{keyboardCommand=fn;}}}
   };
   globalThis.fetch = (url, options) => new Promise(resolve => calls.push({resolve,signal:options.signal,items:JSON.parse(JSON.parse(options.body).messages[1].content).texts}));

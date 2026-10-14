@@ -1,6 +1,6 @@
 import { showState, toggleTab } from './toolbar.js';
 import '../shared/core.js';
-import { cacheGet, cachePutMany, cacheStats, cacheClear } from './cache.js';
+import { cacheGet, cachePutMany, cacheStats, cacheClear, cacheTrackPage, cacheClearPage } from './cache.js';
 import { callModel } from './provider.js';
 import { diagnostics, logEvent } from './diagnostics.js';
 const C = globalThis.SentenceFlowCore;
@@ -98,7 +98,7 @@ async function translate(message, sender) {
   if (message.ignoreCache !== undefined && typeof message.ignoreCache !== 'boolean') throw new Error('翻译请求格式无效。');
   const ids = new Set(); let chars = 0;
   for (const item of message.items) {
-    if (!item || !Number.isInteger(item.id) || ids.has(item.id) || typeof item.text !== 'string' || !item.text.trim() || item.text.length > 1800 || !['fixed','article'].includes(item.kind)) throw new Error('待翻译的句子格式无效。');
+    if (!item || !Number.isInteger(item.id) || ids.has(item.id) || typeof item.text !== 'string' || !item.text.trim() || item.text.length > 6000 || !['fixed','article'].includes(item.kind)) throw new Error('待翻译的句子格式无效。');
     ids.add(item.id); chars += item.text.length;
   }
   if (chars > 6000) throw new Error('单次请求文本过长。');
@@ -108,6 +108,7 @@ async function translate(message, sender) {
   if (!await chrome.permissions.contains({ origins:[C.permissionPattern(config)] })) throw new Error('尚未授予模型服务访问权限，请在扩展管理 → 句流 → 网站访问权限中允许服务地址，然后回到设置测试连接。');
   const origin = new URL(sender.url).origin;
   const prepared = await Promise.all(message.items.map(async item => ({ ...item, key:await hash(C.cacheIdentity(config, origin, item.text, item.kind)), cacheable:item.kind !== 'fixed' || config.cacheFixed })));
+  await cacheTrackPage(sender.url, prepared.filter(item => item.cacheable).map(item => item.key)).catch(() => {});
   const cached = await Promise.all(prepared.map(item => item.cacheable && !message.ignoreCache ? cacheGet(item.key).catch(() => null) : null));
   assertCurrent(consumer,sender);
   const fresh = [], results = [];
@@ -152,7 +153,7 @@ async function handle(message, sender) {
   }
   if (message.type === 'PAGE_CONFIG' && sender.tab) {
     const s = C.validateSettings(await getSettings());
-    return { targetLanguage:s.targetLanguage, scope:s.scope, translateFixed:s.translateFixed, lazy:s.lazy, style:s.style };
+    return { targetLanguage:s.targetLanguage, readingUnit:s.readingUnit, scope:s.scope, translateFixed:s.translateFixed, lazy:s.lazy, style:s.style, batchSize:/(?:^|\/)hy-mt/i.test(s[s.provider].model) ? 4 : 12 };
   }
   if (message.type === 'OPEN_OPTIONS' && sender.tab && sender.frameId === 0 && /^https?:/u.test(sender.url || '')) {
     await chrome.runtime.openOptionsPage(); return {};
@@ -211,4 +212,27 @@ chrome.commands.onCommand.addListener(async command => {
   if (command !== 'toggle-translation') return;
   const [tab] = await chrome.tabs.query({active:true,currentWindow:true});
   await toggleTab(tab);
+});
+
+const clearPageMenu = 'sentence-flow-clear-page-cache';
+async function registerCacheMenu() {
+  await chrome.contextMenus.removeAll();
+  chrome.contextMenus.create({id:clearPageMenu,title:'清除当前页面翻译缓存',contexts:['page','action'],documentUrlPatterns:['http://*/*','https://*/*']});
+}
+chrome.runtime.onInstalled.addListener(() => { void registerCacheMenu().catch(() => {}); });
+chrome.contextMenus?.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== clearPageMenu || !tab?.id || !/^https?:/u.test(tab.url || '')) return;
+  void (async () => {
+    // Cancel before deleting so an unfinished response cannot repopulate the cache.
+    cancelTab(tab.id); cacheEpoch++;
+    const page = await chrome.tabs.sendMessage(tab.id,{type:'PAGE_CACHE_ITEMS'}).catch(() => null);
+    const config = await getSettings();
+    const keys = await Promise.all((page?.items || []).map(item => hash(C.cacheIdentity(config,new URL(tab.url).origin,item.text,item.kind))));
+    await chrome.tabs.sendMessage(tab.id,{type:'RESTORE'}).catch(() => {});
+    await cacheClearPage(tab.url,keys);
+    await showState(tab.id,{phase:'idle'});
+    await chrome.action.setTitle({tabId:tab.id,title:'句流 · 当前页面缓存已清除，点击重新翻译'});
+  })().catch(async reason => {
+    await showState(tab.id,{phase:'error',error:C.errorMessage(reason)});
+  });
 });

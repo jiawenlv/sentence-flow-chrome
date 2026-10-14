@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import '../shared/core.js';
 import { callModel } from '../background/provider.js';
 const C = globalThis.SentenceFlowCore;
-const config = () => C.validateSettings({...C.settings(), ollama:{baseUrl:'http://localhost:11434',model:'test-model',apiKey:''}});
+const config = () => C.validateSettings({...C.settings(), provider:'ollama', ollama:{baseUrl:'http://localhost:11434',model:'test-model',apiKey:''}});
 test('sentence offsets preserve inline DOM text and punctuation', () => {
   const text = '  Hello world. This is the next sentence! “Really?” Yes.  ';
   const sentences = C.segmentText(text,'en');
@@ -119,4 +119,87 @@ test('JSON repair is bounded and reports unsupported constraints; incomplete bat
   let calls=0;
   await assert.rejects(callModel(online,[{id:0,text:'Hello.'}],undefined,async()=>{calls++;return new Response(JSON.stringify({choices:[{message:{content:'{"translations":[]}'}}]}));}),/数量或编号不匹配/);
   assert.equal(calls,1);
+});
+
+test('rejects JSON envelope leakage inside translated text without deleting source punctuation', () => {
+  const text = '小窍门：穿上小丑装吧，西西。”}]}';
+  const output = JSON.stringify({translations:[{id:0,text}]});
+  assert.throws(()=>C.parseTranslations(output,[{id:0,text:'Trick: Put on the clown outfit, Sissy.'}]),/译文中混入/);
+  assert.deepEqual(C.parseTranslations(output,[{id:0,text}]),[{id:0,text}]);
+  assert.deepEqual(C.parseTranslations(JSON.stringify({translations:[{id:0,text:'你好（朋友）。'}]}),[{id:0,text:'Hello (friend).'}]),[{id:0,text:'你好（朋友）。'}]);
+});
+
+test('Hy-MT falls back to individual requests when batch output cannot be aligned',async()=>{
+  const online={...config(),provider:'online',online:{baseUrl:'http://localhost:11434/v1',model:'Hy-MT2-7B-4bit',apiKey:''}};
+  const requests=[];
+  const result=await callModel(online,[{id:7,text:'Hello (friend).'},{id:9,text:'Goodbye.'}],undefined,async(url,init)=>{
+    const body=JSON.parse(init.body);requests.push(body);
+    assert.equal(body.messages.length,1);assert.equal(body.messages[0].role,'user');
+    assert.equal(body.response_format,undefined);assert.equal(body.format,undefined);
+    return new Response(JSON.stringify({choices:[{message:{content:body.messages[0].content.includes('\n%%\n') ? '合并了两句。' : body.messages[0].content.endsWith('Hello (friend).') ? '你好（朋友）。' : '再见。'}}]}));
+  });
+  assert.deepEqual(result,[{id:7,text:'你好（朋友）。'},{id:9,text:'再见。'}]);
+  assert.equal(requests.length,3);
+  assert.ok(requests[1].messages[0].content.endsWith('Hello (friend).'));
+  const controller=new AbortController();let calls=0;
+  await assert.rejects(callModel(online,[{id:0,text:'A'},{id:1,text:'B'}],controller.signal,async()=>{
+    calls++;controller.abort(new Error('stopped'));
+    return new Response(JSON.stringify({choices:[{message:{content:'甲'}}]}));
+  }),/stopped/);
+  assert.equal(calls,1);
+});
+
+test('Hy-MT batches four sentences, validates delimiters, and preserves original IDs',async()=>{
+  const online={...config(),provider:'online',online:{baseUrl:'http://localhost:11434/v1',model:'tencent/Hy-MT2-7B-4bit',apiKey:''}};
+  const items=Array.from({length:6},(_,i)=>({id:i+10,text:'Sentence '+i}));let calls=0;
+  const result=await callModel(online,items,undefined,async(url,init)=>{
+    calls++;const body=JSON.parse(init.body);
+    assert.equal(body.response_format,undefined);
+    const count=body.messages[0].content.split('\n%%\n').length;
+    assert.ok(count<=4);
+    return new Response(JSON.stringify({choices:[{message:{content:Array.from({length:count},()=> '译文。').join('\r\n %% \r\n')}}]}));
+  });
+  assert.equal(calls,2);assert.deepEqual(result.map(row=>row.id),items.map(row=>row.id));
+  let failures=0;
+  await assert.rejects(callModel(online,items,undefined,async()=>{failures++;return new Response('{}',{status:401});}),/API Key/);
+  assert.equal(failures,1,'authentication failures must not trigger single sentence fallback');
+});
+test('Hy-MT skips delimiter batching when source contains the delimiter and rejects empty batch segments',async()=>{
+  const online={...config(),provider:'online',online:{baseUrl:'http://localhost:11434/v1',model:'Hy-MT2',apiKey:''}};
+  let calls=0;
+  const reply=content=>new Response(JSON.stringify({choices:[{message:{content}}]}));
+  await callModel(online,[{id:0,text:'A %% B'},{id:1,text:'C'}],undefined,async()=>{calls++;return reply('译文');});
+  assert.equal(calls,2);
+  calls=0;
+  const rows=await callModel(online,[{id:0,text:'A'},{id:1,text:'B'}],undefined,async()=>{calls++;return reply(calls===1?'甲\n%%\n':'单句译文');});
+  assert.equal(calls,3);assert.equal(rows.length,2);
+});
+
+test('paragraph extraction keeps adjacent sentences and inline text together with exact offsets',()=>{
+  const text='  Maya gave Emma a notebook. She opened it. Then she called Maya.  ';
+  const parts=C.paragraphText(text);
+  assert.deepEqual(parts,[{text:text.trim(),start:2,end:text.length-2}]);
+  const long='This paragraph is still complete. '.repeat(100).trim();
+  assert.ok(long.length>1800);assert.equal(C.paragraphText(long).length,1);
+  assert.equal(C.settings().readingUnit,'paragraph');
+});
+test('only exceptional long paragraphs are chunked and UTF-16 pairs stay intact',()=>{
+  const text='A context sentence with an emoji 😀. '.repeat(300).trim();
+  const parts=C.paragraphText(text);
+  assert.ok(parts.length>1);assert.ok(parts.every(part=>part.text.length<=6000 && part.text===text.slice(part.start,part.end)));
+  assert.equal(C.normalizeText(parts.map(part=>part.text).join(' ')),C.normalizeText(text));
+  const word='😀'.repeat(4000);assert.ok(C.paragraphText(word).every(part=>!/[\uD800-\uDBFF]$/u.test(part.text) && !/^[\uDC00-\uDFFF]/u.test(part.text)));
+});
+
+test('Hy-MT fallback retries whole paragraphs without splitting their sentences',async()=>{
+  const online={...config(),provider:'online',online:{baseUrl:'http://localhost:11434/v1',model:'Hy-MT2-7B',apiKey:''}};
+  const items=[{id:0,text:'Maya handed Emma a notebook. She opened it and read the letter.'},{id:1,text:'We stopped by the river bank. The water was very clear.'}];
+  const prompts=[];
+  const result=await callModel(online,items,undefined,async(url,init)=>{
+    prompts.push(JSON.parse(init.body).messages[0].content);
+    return new Response(JSON.stringify({choices:[{message:{content:prompts.length===1?'合并的译文':'完整段落译文。'}}]}));
+  });
+  assert.equal(prompts.length,3);
+  assert.ok(prompts[1].endsWith(items[0].text));assert.ok(prompts[2].endsWith(items[1].text));
+  assert.deepEqual(result.map(row=>row.id),[0,1]);
 });

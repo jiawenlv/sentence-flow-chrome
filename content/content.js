@@ -23,7 +23,7 @@
   function status() {
     const sentences = [...records.values()].flatMap(record => record.sentences);
     const completed = sentences.filter(item => item.state === 'done');
-    return { version:SCRIPT_VERSION, active:!!session, phase, paused, total:sentences.length, translated:completed.length, cacheHits:completed.filter(item => item.cached).length, requests, pending:sentences.filter(item => item.state === 'pending').length, error, targetLanguage:prefs?.targetLanguage || 'zh-CN', lazy:prefs?.lazy ?? true };
+    return { version:SCRIPT_VERSION, readingUnit:prefs?.readingUnit || 'paragraph', active:!!session, phase, paused, total:sentences.length, translated:completed.length, cacheHits:completed.filter(item => item.cached).length, requests, pending:sentences.filter(item => item.state === 'pending').length, error, targetLanguage:prefs?.targetLanguage || 'zh-CN', lazy:prefs?.lazy ?? true };
   }
   let notice, noticeKey = '', dismissedNotice = '';
   function removeNotice() { notice?.remove(); notice = null; noticeKey = ''; }
@@ -281,13 +281,13 @@
       const record = { element, nodes:source.nodes, source:source.source, sentences:[], eligible:all || !prefs.lazy || nearViewport(element) };
       for (const run of source.runs) {
         let pieces;
-        try { pieces = C.segmentText(run.text, element.closest('[lang]')?.lang || undefined); } catch { pieces = C.segmentText(run.text); }
+        try { pieces = (prefs.readingUnit === 'sentence' ? C.segmentText : C.paragraphText)(run.text, element.closest('[lang]')?.lang || undefined); } catch { pieces = (prefs.readingUnit === 'sentence' ? C.segmentText : C.paragraphText)(run.text); }
         for (const piece of pieces) {
           // Bound a single pathological block, not the entire scrolling feed.
           if (!C.needsTranslation(piece.text, prefs.targetLanguage) || record.sentences.length >= 5000) continue;
           const range = endpointRange(run.nodes, piece.end, element);
           if (!range) continue;
-          record.sentences.push({ id:nextId++, text:piece.text, kind:group.kind, range, state:'pending', record });
+          record.sentences.push({ id:nextId++, text:piece.text, kind:group.kind, range, paragraph:prefs.readingUnit !== 'sentence' && group.kind === 'article' && source.runs.length === 1 && !element.matches(`${UNIT},button,a,h1,h2,h3,h4,h5,h6,[role="heading"]`) && ['block','flow-root','list-item','table-cell'].includes(getComputedStyle(element).display), state:'pending', record });
         }
       }
       records.set(element, record);
@@ -325,17 +325,18 @@
     span.lang = prefs.targetLanguage;
     span.textContent = translatedText;
     const heading = !!item.record.element.closest('h1,h2,h3,h4,h5,h6,[role="heading"]');
-    span.setAttribute('data-sentence-flow-layout', heading ? 'heading' : 'inline');
+    const block = heading || item.paragraph;
+    span.setAttribute('data-sentence-flow-layout', heading ? 'heading' : item.paragraph ? 'paragraph' : 'inline');
     // Follow the actual site's text color, including custom dark themes which
     // do not declare color-scheme. No independent colored cards or backgrounds.
     const styles = {
-      display:heading ? 'block' : 'inline', color:'inherit', 'background':'transparent',
+      display:block ? 'block' : 'inline', color:'inherit', 'background':'transparent',
       border:'0', 'border-radius':'0', padding:'0', 'box-shadow':'none', 'text-shadow':'none',
       'font-family':'inherit', 'font-style':'normal', 'font-weight':'400',
       'font-size':heading ? 'min(1em, clamp(14px, 0.44em, 24px))' : prefs.style === 'plain' ? '1em' : '0.92em',
       'line-height':heading ? '1.55' : 'inherit', 'letter-spacing':'normal', 'text-transform':'none',
-      'white-space':'normal', 'vertical-align':'baseline',
-      'margin-inline':heading ? '0' : '0.5em', 'margin-block':heading ? '0.45em 0.15em' : '0',
+      'white-space':'normal', 'overflow-wrap':'anywhere', 'vertical-align':'baseline',
+      'margin-inline':block ? '0' : '0.5em', 'margin-block':block ? '0.45em 0.15em' : '0',
       opacity:prefs.style === 'plain' ? '1' : '0.86', 'text-decoration':'none'
     };
     if (prefs.style === 'underline') {
@@ -376,7 +377,7 @@
   function pump() {
     if (!session || paused || error) return;
     while (busy < 2) {
-      const items = C.packItems(pending())[0];
+      const items = C.packItems(pending(),prefs?.batchSize || 12, 6000)[0];
       if (!items?.length) break;
       items.forEach(item => { item.state = 'loading'; });
       phase = 'running';
@@ -460,6 +461,7 @@
   function translateAll() { all = true; for (const record of records.values()) record.eligible = true; pump(); return status(); }
   chrome.runtime.onMessage.addListener((message,sender,respond) => {
     if (sender.id !== chrome.runtime.id) return;
+    if (message.type === 'PAGE_CACHE_ITEMS') { respond({ok:true,items:[...records.values()].flatMap(record => record.sentences.map(({text,kind}) => ({text,kind})))}); return; }
     if (message.type === 'PAGE_STATUS') { respond({ ok:true, ...status() }); return; }
     if (message.type === 'PAGE_NOTICE') { showNotice(message.error || '翻译失败，请查看配置并测试连接。'); respond({ok:true}); return; }
     const actions = { START:() => start({ignoreCache:message.ignoreCache}), RESTORE:restore, PAUSE:togglePause, ALL:translateAll, TOGGLE:() => session ? restore() : start() };

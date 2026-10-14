@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Paragraph context · Sentence Flow</title>
+<style>body{max-width:720px;margin:60px auto;padding:0 24px;font:18px/1.8 system-ui;color:#26372d;background:#fafbf7}h1{font-size:32px}p{margin:28px 0}button{font:inherit}pre{overflow:auto}</style></head>
+<body><main><h1>Keeping the story together</h1>
+<p id="context">Maya handed her notebook to Emma. <strong>Emma</strong> opened it and found a letter inside. She followed the <a href="#details" id="original-link">instructions in the letter</a> and called Maya.</p>
+<p id="second">The river bank was covered in snow. We sat there and watched the water flow. It was a quiet place to rest.</p>
+<p id="long"></p>
+<div id="actions">Before action <button id="action">Open details</button> After action</div>
+<pre>const ignored = 'Keep this code unchanged.';</pre><p contenteditable="true">An editable note stays untouched.</p>
+</main><script>document.querySelector('#long').textContent='The inspector checked the bridge carefully. The structure remained safe after the storm. '.repeat(35).trim();window.actionClicks=0;document.querySelector('#action').onclick=()=>window.actionClicks++;</script></body></html>

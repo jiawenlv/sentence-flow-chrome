@@ -9,7 +9,7 @@ function setup(model = 'test-model') {
   phase = 'idle'; version = '1.4.0'; optionsOpened = 0; injections = []; dispatches = []; notices = [];
   globalThis.chrome = {
     runtime:{getManifest:()=>({version:'1.4.0'}),openOptionsPage:async()=>{optionsOpened++;}},
-    storage:{local:{get:async()=>({settings:{ollama:{model}}})}},
+    storage:{local:{get:async()=>({settings:{provider:'ollama',ollama:{model}}})}},
     scripting:{executeScript:async args=>{injections.push(args);}},
     action:{
       setBadgeText:async({tabId,text})=>{badges.set(tabId,text);},
@@ -34,7 +34,7 @@ test('toolbar dispatches a second toggle during async startup; stop works even a
   setup();
   const first = toggleTab(tab);
   await dispatched(1);
-  chrome.storage.local.get = async()=>({settings:{ollama:{model:''}}});
+  chrome.storage.local.get = async()=>({settings:{provider:'ollama',ollama:{model:''}}});
   await toggleTab(tab);
   assert.equal(phase,'idle'); assert.equal(optionsOpened,0);
   finishStart(); await first;
@@ -53,7 +53,7 @@ test('missing model opens native options without starting translation; restricte
 });
 test('invalid saved service addresses open settings and injection failures explain website permissions',async()=>{
   setup();
-  chrome.storage.local.get = async()=>({settings:{ollama:{model:'test',baseUrl:'broken-url'}}});
+  chrome.storage.local.get = async()=>({settings:{provider:'ollama',ollama:{model:'test',baseUrl:'broken-url'}}});
   await toggleTab(tab);
   assert.equal(optionsOpened,1); assert.deepEqual(dispatches,[]);
   assert.match(notices[0],/服务地址无效/);

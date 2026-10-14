@@ -15,7 +15,7 @@ function clean(details) {
   }
   return result;
 }
-export function createDiagnostics(storage, now = () => new Date().toISOString()) {
+export function createDiagnostics(storage, now = () => new Date().toISOString(), sink = null) {
   let tail = Promise.resolve();
   const serial = action => { const result = tail.then(action); tail = result.catch(()=>{}); return result; };
   const read = async () => {
@@ -25,6 +25,7 @@ export function createDiagnostics(storage, now = () => new Date().toISOString())
   return {
     record(event,details = {}) {
       const entry = {time:now(),event:safeText(event),...clean(details)};
+      if (sink) void Promise.resolve().then(()=>sink(entry)).catch(()=>{});
       return serial(async()=>{const rows=await read(); rows.push(entry); await storage.set({[KEY]:rows.slice(-LIMIT)});}).catch(()=>{});
     },
     read:() => serial(read),
@@ -32,5 +33,9 @@ export function createDiagnostics(storage, now = () => new Date().toISOString())
   };
 }
 const local = {get:key=>chrome.storage.local.get(key),set:value=>chrome.storage.local.set(value)};
-export const diagnostics = createDiagnostics(local);
+const fileSink = typeof ServiceWorkerGlobalScope === 'undefined' ? null : entry => fetch('http://127.0.0.1:18766/events', {
+  method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry),
+  credentials:'omit',redirect:'error',signal:AbortSignal.timeout(1500)
+});
+export const diagnostics = createDiagnostics(local,undefined,fileSink);
 export const logEvent = (event,details) => diagnostics.record(event,details);

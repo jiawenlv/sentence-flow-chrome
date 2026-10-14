@@ -1,6 +1,6 @@
 {
   "name": "sentence-flow",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
     "test:e2e": "node tests/e2e.mjs",
     "package": "python3 tools/package.py"
   },
-  "description": "Sentence-by-sentence bilingual reading for Chrome with Ollama and OpenAI-compatible models.",
+  "description": "Paragraph-based bilingual reading for Chrome with local and online OpenAI-compatible models.",
   "license": "MIT",
   "engines": {
     "node": ">=20.11.0"
